@@ -10,14 +10,13 @@
 #include <dt-bindings/zmk/ext_power.h>
 
 / {
+    behaviors {
+        bindings = <&studio_unlock>;
+    };
     keymap {
         compatible = "zmk,keymap";
 
 // GRAVE
-        studio_layer {
-
-            bindings = <&studio_unlock>;
-        };
 
         default_layer {
 // ------------------------------------------------------------------------------------------------------------
