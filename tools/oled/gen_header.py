@@ -2,6 +2,7 @@
 
 import os
 
+from art import peripheral_art
 from font import ADV_X, ADV_Y, FONT, GLYPH_H, GLYPH_W, ICONS
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -23,7 +24,7 @@ lines = [
     f"#define LILLY_ADV_Y {ADV_Y}",
     "",
     "/* ASCII 0x20..0x7E, 5 rows each, bit (W-1) = leftmost pixel; lowercase -> uppercase */",
-    "static const uint8_t lilly_font[95][LILLY_GLYPH_H] = {",
+    "static const __attribute__((unused)) uint8_t lilly_font[95][LILLY_GLYPH_H] = {",
 ]
 for code in range(0x20, 0x7F):
     ch = chr(code)
@@ -38,8 +39,16 @@ for name, rows in ICONS.items():
     bits = ", ".join(f"0x{b:x}" for b in rows_to_bits(rows))
     lines.append(f"#define LILLY_ICON_{name.upper()}_W {w}")
     lines.append(f"#define LILLY_ICON_{name.upper()}_H {h}")
-    lines.append(f"static const uint8_t lilly_icon_{name}[{h}] = {{{bits}}};")
+    lines.append(f"static const __attribute__((unused)) uint8_t lilly_icon_{name}[{h}] = {{{bits}}};")
     lines.append("")
+
+art = peripheral_art()
+lines.append("/* Right OLED picture, 32x128, bit 31 = leftmost pixel */")
+lines.append(f"#define LILLY_ART_H {len(art)}")
+lines.append("static const __attribute__((unused)) uint32_t lilly_art[LILLY_ART_H] = {")
+for r in art:
+    lines.append(f"    0x{int(r.replace('#', '1').replace('.', '0'), 2):08x},")
+lines += ["};", ""]
 
 with open(OUT, "w") as f:
     f.write("\n".join(lines))

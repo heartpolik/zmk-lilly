@@ -8,7 +8,7 @@
  *
  * Central (left):  connection icon + profile, caps-lock dot, battery with two
  *                  bars (top = left half, bottom = right half), key log, layer.
- * Peripheral:      link icon, own battery.
+ * Peripheral:      a static picture (tools/oled/art.py -> lilly_art).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -45,8 +45,6 @@
 #endif
 #else
 #define LILLY_CENTRAL 0
-#include <zmk/split/bluetooth/peripheral.h>
-#include <zmk/events/split_peripheral_status_changed.h>
 #endif
 
 #include "lilly_gfx.h"
@@ -90,7 +88,7 @@ static uint8_t landscape_buf[LV_CANVAS_BUF_SIZE(PH, PW, LV_COLOR_FORMAT_GET_BPP(
                                                 LV_DRAW_BUF_STRIDE_ALIGN)] __aligned(4);
 static lv_obj_t *landscape;
 
-static void fill(int x, int y, int w, int h, bool on) {
+static __maybe_unused void fill(int x, int y, int w, int h, bool on) {
     for (int yy = MAX(y, 0); yy < MIN(y + h, PH); yy++) {
         for (int xx = MAX(x, 0); xx < MIN(x + w, PW); xx++) {
             px[yy][xx] = on ? ON_VAL : OFF_VAL;
@@ -98,7 +96,7 @@ static void fill(int x, int y, int w, int h, bool on) {
     }
 }
 
-static void bitmap(int x, int y, const uint8_t *rows, int w, int h, int scale) {
+static __maybe_unused void bitmap(int x, int y, const uint8_t *rows, int w, int h, int scale) {
     for (int r = 0; r < h; r++) {
         for (int c = 0; c < w; c++) {
             if (rows[r] & BIT(w - 1 - c)) {
@@ -108,7 +106,7 @@ static void bitmap(int x, int y, const uint8_t *rows, int w, int h, int scale) {
     }
 }
 
-static void text(int x, int y, const char *s, int scale) {
+static __maybe_unused void text(int x, int y, const char *s, int scale) {
     for (; *s; s++, x += LILLY_ADV_X * scale) {
         char ch = *s;
         if (ch >= 'a' && ch <= 'z') {
@@ -123,7 +121,7 @@ static void text(int x, int y, const char *s, int scale) {
 
 #define BAT_UNKNOWN 0xFF
 
-static void bar(int y, int h, uint8_t level) {
+static __maybe_unused void bar(int y, int h, uint8_t level) {
     if (level == BAT_UNKNOWN) {
         return;
     }
@@ -134,7 +132,7 @@ static void bar(int y, int h, uint8_t level) {
     fill(BAR_X, y, w, h, true);
 }
 
-static void battery(uint8_t top, uint8_t bottom, bool split) {
+static __maybe_unused void battery(uint8_t top, uint8_t bottom, bool split) {
     fill(BAT_X, BAT_Y, BAT_W, BAT_H, true);
     fill(BAT_X + 1, BAT_Y + 1, BAT_W - 2, BAT_H - 2, false);
     fill(BAT_X + BAT_W, BAT_Y + 2, 2, BAT_H - 4, true); /* terminal */
@@ -157,9 +155,9 @@ static void present(void) {
 
 /* ----------------------------------------------------------------- state -- */
 
+#if LILLY_CENTRAL
 static struct {
     uint8_t bat_self;
-#if LILLY_CENTRAL
     uint8_t bat_peripheral;
     struct zmk_endpoint_instance endpoint;
     int profile_index;
@@ -167,17 +165,11 @@ static struct {
     bool caps;
     const char *layer_label;
     zmk_keymap_layer_index_t layer_index;
-#else
-    bool split_connected;
-#endif
 } st = {
     .bat_self = BAT_UNKNOWN,
-#if LILLY_CENTRAL
     .bat_peripheral = BAT_UNKNOWN,
-#endif
 };
 
-#if LILLY_CENTRAL
 /* key log: LOG_ROWS lines of LOG_COLS chars, newest line last */
 static char log_lines[LOG_ROWS][LOG_COLS + 1];
 static uint8_t log_row; /* current (last used) row */
@@ -219,17 +211,21 @@ static void render(void) {
     int w = strlen(layer) * LILLY_ADV_X * 2 - 2;
     text((PW - w) / 2, LAYER_Y, layer, 2);
 #else
-    bitmap(ICON_X, ICON_Y, lilly_icon_bt, LILLY_ICON_BT_W, LILLY_ICON_BT_H, 1);
-    if (!st.split_connected) {
-        text(PROFILE_X, PROFILE_Y, "?", 1);
+    for (int y = 0; y < MIN(LILLY_ART_H, PH); y++) {
+        for (int x = 0; x < PW; x++) {
+            if (lilly_art[y] & BIT(31 - x)) {
+                px[y][x] = ON_VAL;
+            }
+        }
     }
-    battery(st.bat_self, BAT_UNKNOWN, false);
 #endif
 
     present();
 }
 
 /* ------------------------------------------------------------- listeners -- */
+
+#if LILLY_CENTRAL
 
 /* own battery */
 struct self_bat_state {
@@ -249,8 +245,6 @@ static struct self_bat_state self_bat_get(const zmk_event_t *eh) {
 
 ZMK_DISPLAY_WIDGET_LISTENER(lilly_self_bat, struct self_bat_state, self_bat_update, self_bat_get)
 ZMK_SUBSCRIPTION(lilly_self_bat, zmk_battery_state_changed);
-
-#if LILLY_CENTRAL
 
 /* right half battery, fetched over split BLE */
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
@@ -456,24 +450,6 @@ static int keylog_listener(const zmk_event_t *eh) {
 ZMK_LISTENER(lilly_keylog, keylog_listener);
 ZMK_SUBSCRIPTION(lilly_keylog, zmk_keycode_state_changed);
 
-#else /* peripheral */
-
-struct link_state {
-    bool connected;
-};
-
-static void link_update(struct link_state s) {
-    st.split_connected = s.connected;
-    render();
-}
-
-static struct link_state link_get(const zmk_event_t *_eh) {
-    return (struct link_state){.connected = zmk_split_bt_peripheral_is_connected()};
-}
-
-ZMK_DISPLAY_WIDGET_LISTENER(lilly_link, struct link_state, link_update, link_get)
-ZMK_SUBSCRIPTION(lilly_link, zmk_split_peripheral_status_changed);
-
 #endif /* LILLY_CENTRAL */
 
 /* ---------------------------------------------------------------- screen -- */
@@ -490,8 +466,8 @@ lv_obj_t *zmk_display_status_screen(void) {
     lv_canvas_set_buffer(landscape, landscape_buf, PH, PW, CF);
     lv_obj_align(landscape, LV_ALIGN_TOP_LEFT, 0, 0);
 
-    lilly_self_bat_init();
 #if LILLY_CENTRAL
+    lilly_self_bat_init();
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
     lilly_periph_bat_init();
 #endif
@@ -500,8 +476,6 @@ lv_obj_t *zmk_display_status_screen(void) {
 #if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
     lilly_caps_init();
 #endif
-#else
-    lilly_link_init();
 #endif
 
     render();
