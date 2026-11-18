@@ -1,0 +1,133 @@
+diff --git a/app/Kconfig b/app/Kconfig
+index fcfdfcb..b0c53f3 100644
+--- a/app/Kconfig
++++ b/app/Kconfig
+@@ -45,6 +45,13 @@ config BT_DIS_PNP_PID
+ config BT_DIS_PNP_VID_SRC
+     default 2
+ 
++config ZMK_HID_APPLE_FN
++    bool "Report the Apple Fn/Globe key (AppleVendor Top Case page 0xFF, usage 0x03)"
++    help
++      Replaces the reserved byte of the keyboard report with the Apple vendor
++      Fn key bit. macOS only honours it when the device presents an Apple
++      VID/PID (USB_DEVICE_VID / BT_DIS_PNP_VID). Use keycode APPLE_FN.
++
+ config BT_DIS_MODEL_NUMBER_STR
+     default ZMK_KEYBOARD_NAME
+ 
+diff --git a/app/include/dt-bindings/zmk/hid_usage_pages.h b/app/include/dt-bindings/zmk/hid_usage_pages.h
+index 7fa54fd..44cfcc4 100644
+--- a/app/include/dt-bindings/zmk/hid_usage_pages.h
++++ b/app/include/dt-bindings/zmk/hid_usage_pages.h
+@@ -14,6 +14,9 @@
+ #define ZMK_HID_USAGE_ID(usage) (usage & 0xFFFF)
+ #define ZMK_HID_USAGE_PAGE(usage) ((usage >> 16) & 0xFF)
+ 
++#define HID_USAGE_APPLE_VENDOR_TOP_CASE (0xFF) // AppleVendor Top Case
++#define HID_USAGE_APPLE_TOP_CASE_FN (0x03)     // Fn / Globe
++
+ /* WARNING: DEPRECATED from dt-bindings/zmk/keys.h */
+ #define USAGE_KEYPAD (0x07)   // WARNING: DEPRECATED (DO NOT USE)
+ #define USAGE_CONSUMER (0x0C) // WARNING: DEPRECATED (DO NOT USE)
+diff --git a/app/include/dt-bindings/zmk/keys.h b/app/include/dt-bindings/zmk/keys.h
+index 364ffa8..16e9e17 100644
+--- a/app/include/dt-bindings/zmk/keys.h
++++ b/app/include/dt-bindings/zmk/keys.h
+@@ -1443,3 +1443,6 @@
+ /* Apple Globe key */
+ #define C_AC_NEXT_KEYBOARD_LAYOUT_SELECT (ZMK_HID_USAGE(HID_USAGE_CONSUMER, 0x029D))
+ #define GLOBE (C_AC_NEXT_KEYBOARD_LAYOUT_SELECT)
++
++/* Apple Fn / Globe (vendor page, requires CONFIG_ZMK_HID_APPLE_FN and an Apple VID/PID) */
++#define APPLE_FN (ZMK_HID_USAGE(HID_USAGE_APPLE_VENDOR_TOP_CASE, HID_USAGE_APPLE_TOP_CASE_FN))
+diff --git a/app/include/zmk/hid.h b/app/include/zmk/hid.h
+index 962180e..cb4d71c 100644
+--- a/app/include/zmk/hid.h
++++ b/app/include/zmk/hid.h
+@@ -116,10 +116,23 @@ static const uint8_t zmk_hid_report_desc[] = {
+     HID_REPORT_COUNT(0x08),
+     HID_INPUT(ZMK_HID_MAIN_VAL_DATA | ZMK_HID_MAIN_VAL_VAR | ZMK_HID_MAIN_VAL_ABS),
+ 
++#if IS_ENABLED(CONFIG_ZMK_HID_APPLE_FN)
++    HID_USAGE_PAGE(HID_USAGE_APPLE_VENDOR_TOP_CASE),
++    HID_USAGE(HID_USAGE_APPLE_TOP_CASE_FN),
++    HID_LOGICAL_MIN8(0x00),
++    HID_LOGICAL_MAX8(0x01),
++    HID_REPORT_SIZE(0x01),
++    HID_REPORT_COUNT(0x01),
++    HID_INPUT(ZMK_HID_MAIN_VAL_DATA | ZMK_HID_MAIN_VAL_VAR | ZMK_HID_MAIN_VAL_ABS),
++    HID_REPORT_SIZE(0x07),
++    HID_REPORT_COUNT(0x01),
++    HID_INPUT(ZMK_HID_MAIN_VAL_CONST | ZMK_HID_MAIN_VAL_VAR | ZMK_HID_MAIN_VAL_ABS),
++#else
+     HID_USAGE_PAGE(HID_USAGE_KEY),
+     HID_REPORT_SIZE(0x08),
+     HID_REPORT_COUNT(0x01),
+     HID_INPUT(ZMK_HID_MAIN_VAL_CONST | ZMK_HID_MAIN_VAL_VAR | ZMK_HID_MAIN_VAL_ABS),
++#endif // IS_ENABLED(CONFIG_ZMK_HID_APPLE_FN)
+ 
+ #if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
+ 
+diff --git a/app/src/endpoints.c b/app/src/endpoints.c
+index 17cdc5d..d2b605b 100644
+--- a/app/src/endpoints.c
++++ b/app/src/endpoints.c
+@@ -255,6 +255,11 @@ int zmk_endpoint_send_report(uint16_t usage_page) {
+ 
+     case HID_USAGE_CONSUMER:
+         return send_consumer_report();
++
++#if IS_ENABLED(CONFIG_ZMK_HID_APPLE_FN)
++    case HID_USAGE_APPLE_VENDOR_TOP_CASE:
++        return send_keyboard_report();
++#endif // IS_ENABLED(CONFIG_ZMK_HID_APPLE_FN)
+     }
+ 
+     LOG_ERR("Unsupported usage page %d", usage_page);
+diff --git a/app/src/hid.c b/app/src/hid.c
+index d8700c3..47db6ad 100644
+--- a/app/src/hid.c
++++ b/app/src/hid.c
+@@ -347,6 +347,14 @@ int zmk_hid_press(uint32_t usage) {
+         return zmk_hid_keyboard_press(ZMK_HID_USAGE_ID(usage));
+     case HID_USAGE_CONSUMER:
+         return zmk_hid_consumer_press(ZMK_HID_USAGE_ID(usage));
++#if IS_ENABLED(CONFIG_ZMK_HID_APPLE_FN)
++    case HID_USAGE_APPLE_VENDOR_TOP_CASE:
++        if (ZMK_HID_USAGE_ID(usage) != HID_USAGE_APPLE_TOP_CASE_FN) {
++            return -EINVAL;
++        }
++        keyboard_report.body._reserved |= BIT(0);
++        return 0;
++#endif // IS_ENABLED(CONFIG_ZMK_HID_APPLE_FN)
+     }
+     return -EINVAL;
+ }
+@@ -357,6 +365,14 @@ int zmk_hid_release(uint32_t usage) {
+         return zmk_hid_keyboard_release(ZMK_HID_USAGE_ID(usage));
+     case HID_USAGE_CONSUMER:
+         return zmk_hid_consumer_release(ZMK_HID_USAGE_ID(usage));
++#if IS_ENABLED(CONFIG_ZMK_HID_APPLE_FN)
++    case HID_USAGE_APPLE_VENDOR_TOP_CASE:
++        if (ZMK_HID_USAGE_ID(usage) != HID_USAGE_APPLE_TOP_CASE_FN) {
++            return -EINVAL;
++        }
++        keyboard_report.body._reserved &= ~BIT(0);
++        return 0;
++#endif // IS_ENABLED(CONFIG_ZMK_HID_APPLE_FN)
+     }
+     return -EINVAL;
+ }
+@@ -367,6 +383,11 @@ bool zmk_hid_is_pressed(uint32_t usage) {
+         return zmk_hid_keyboard_is_pressed(ZMK_HID_USAGE_ID(usage));
+     case HID_USAGE_CONSUMER:
+         return zmk_hid_consumer_is_pressed(ZMK_HID_USAGE_ID(usage));
++#if IS_ENABLED(CONFIG_ZMK_HID_APPLE_FN)
++    case HID_USAGE_APPLE_VENDOR_TOP_CASE:
++        return ZMK_HID_USAGE_ID(usage) == HID_USAGE_APPLE_TOP_CASE_FN &&
++               (keyboard_report.body._reserved & BIT(0));
++#endif // IS_ENABLED(CONFIG_ZMK_HID_APPLE_FN)
+     }
+     return false;
+ }
