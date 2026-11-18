@@ -184,7 +184,10 @@ static void present(void) {
 }
 
 static void render(void) {
-    static char line1[12], line2[12], line3[8], line4[8];
+    static char line3[8];
+#if LILLY_CENTRAL
+    static char line1[16], line2[8], line4[8];
+#endif
 
     lv_canvas_fill_bg(portrait, BG, LV_OPA_COVER);
 
