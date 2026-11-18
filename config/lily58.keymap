@@ -23,7 +23,7 @@
         space_ret_btn: space_ret_btn {
             compatible = "zmk,behavior-tap-dance";
             #binding-cells = <0>;
-            bindings = <&kp SPACE>, <&kp RET>;
+            bindings = <&spc_fn>, <&kp RET>;
         };
 
         grv_tild_btn: grv_tild_btn {
@@ -38,11 +38,13 @@
             bindings = <&kp SLASH>, <&kp LG(SLASH)>;
         };
 
-        // Tap: Left Ctrl, double tap: Apple Fn/Globe (switch input source)
-        ctrl_lang: ctrl_lang {
-            compatible = "zmk,behavior-tap-dance";
+        // Space; Ctrl+Space sends native Apple Fn/Globe instead (switch input source).
+        // Ctrl is masked so macOS sees a clean Fn press.
+        spc_fn: spc_fn {
+            compatible = "zmk,behavior-mod-morph";
             #binding-cells = <0>;
-            bindings = <&kp LEFT_CONTROL>, <&kp APPLE_FN>;
+            bindings = <&kp SPACE>, <&kp APPLE_FN>;
+            mods = <(MOD_LCTL|MOD_RCTL)>;
         };
 
         // Encoder rotation that does nothing (blocks fall-through to lower layers)
@@ -74,8 +76,8 @@
 &kp ESC    &kp N1  &kp N2  &kp N3    &kp N4  &kp N5                                    &kp N6    &kp N7  &kp N8     &kp N9   &kp N0         &kp MINUS
 &kp TAB    &kp Q   &kp W   &kp E     &kp R   &kp T                                     &kp Y     &kp U   &kp I      &kp O    &kp P          &kp EQUAL
 &mt LSHFT APPLE_FN  &kp A   &kp S   &kp D     &kp F   &kp G                                     &kp H     &kp J   &kp K      &kp L    &kp SEMI       &kp SQT
-&ctrl_lang  &kp Z   &kp X   &kp C     &kp V   &kp B     &bracket_btn    &kp C_MUTE      &kp N     &kp M   &kp COMMA  &kp DOT  &comment_line  &kp RSHFT
-                           &kp LALT  &mo 1   &kp LGUI  &kp SPACE       &space_ret_btn  &kp BSPC  &mo 2   &kp RET
+&kp LCTRL  &kp Z   &kp X   &kp C     &kp V   &kp B     &bracket_btn    &kp C_MUTE      &kp N     &kp M   &kp COMMA  &kp DOT  &comment_line  &kp RSHFT
+                           &kp LALT  &mo 1   &kp LGUI  &spc_fn          &space_ret_btn  &kp BSPC  &mo 2   &kp RET
             >;
             // sensor-bindings: <left encoder>  <right encoder>  (CW, CCW)
             sensor-bindings = <&inc_dec_kp C_VOL_UP C_VOL_DN  &inc_dec_kp C_VOL_UP C_VOL_DN>;
