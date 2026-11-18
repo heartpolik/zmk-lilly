@@ -1,6 +1,6 @@
 # Board: ProMicro nRF52840 (nice!nano-compatible clone) -> uses the nice_nano board definition.
 include:
-  - board: nice_nano
+  - board: nice_nano//zmk
     shield: lily58_left
-  - board: nice_nano
+  - board: nice_nano//zmk
     shield: lily58_right
