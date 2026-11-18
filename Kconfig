@@ -1,0 +1,18 @@
+config LILLY_STATUS_SCREEN
+    bool "Lilly custom OLED status screen"
+    default y if ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
+    depends on ZMK_DISPLAY
+    select LV_USE_IMAGE
+    select LV_USE_CANVAS
+    select LV_FONT_MONTSERRAT_12
+    select LV_FONT_UNSCII_8
+
+if LILLY_STATUS_SCREEN
+
+config LILLY_STATUS_SCREEN_ROTATE_270
+    bool "Rotate the portrait layout by 270 degrees instead of 90"
+
+config LILLY_STATUS_SCREEN_INVERTED
+    bool "Invert foreground/background colors"
+
+endif

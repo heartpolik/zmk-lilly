@@ -1,0 +1,5 @@
+if(CONFIG_LILLY_STATUS_SCREEN)
+  zephyr_library()
+  zephyr_library_include_directories(${CMAKE_SOURCE_DIR}/include)
+  zephyr_library_sources(src/display/lilly_status_screen.c)
+endif()
