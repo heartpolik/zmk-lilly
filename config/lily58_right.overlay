@@ -8,8 +8,9 @@
     right_encoder: encoder_right {
         compatible = "alps,ec11";
         // Lily58 PCB is reversible: the right half uses the same pins as the left one.
-        a-gpios = <&pro_micro 21 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
-        b-gpios = <&pro_micro 20 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+        // a/b swapped vs. left_encoder: with 21/20 the rotation was reversed.
+        a-gpios = <&pro_micro 20 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+        b-gpios = <&pro_micro 21 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
         steps = <80>;
         status = "disabled";
     };
