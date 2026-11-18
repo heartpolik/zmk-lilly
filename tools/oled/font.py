@@ -119,3 +119,12 @@ ICONS = {
         ".##.",
     ],
 }
+
+
+def _rotate_cw(rows):
+    h, w = len(rows), len(rows[0])
+    return ["".join(rows[h - 1 - r][c] for r in range(h)) for c in range(w)]
+
+
+# USB trident lying on its side: plug on the left, arrow pointing right (11x7)
+ICONS["usb"] = _rotate_cw(ICONS["usb"])

@@ -14,13 +14,12 @@ from font import ADV_X, ADV_Y, FONT, GLYPH_H, GLYPH_W, ICONS
 PW, PH = 32, 128
 
 # --- layout (keep in sync with lilly_status_screen.c) ---------------------
-ICON_X, ICON_Y = 1, 1
-PROFILE_X, PROFILE_Y = 10, 4
-CAPS_X, CAPS_Y = 27, 4
+TOP_Y, TOP_H, TOP_GAP = 1, 11, 2  # top row: caps dot | centered icon | connection info
+CAPS_X = 1
 BAT_X, BAT_Y, BAT_W, BAT_H = 1, 16, 27, 9
 BAR_X, BAR_MAX_W = 3, 23
-LOG_Y, LOG_ROWS, LOG_COLS = 31, 11, 8
-LAYER_Y = 116
+LAYER_Y = 28
+LOG_Y, LOG_ROWS, LOG_COLS = 42, 12, 8
 
 
 class Canvas:
@@ -72,14 +71,26 @@ def keylog(c, lines):
         c.text(0, LOG_Y + i * ADV_Y, line[:LOG_COLS])
 
 
+def top_row(c, icon, info="", caps=False):
+    """Caps dot fixed on the left, icon strictly centered, info right of the icon."""
+    def vmid(h):
+        return TOP_Y + (TOP_H - h) // 2
+    if caps:
+        c.bitmap(CAPS_X, vmid(len(ICONS["dot"])), ICONS["dot"])
+    iw = len(icon[0])
+    ix = (PW - iw) // 2
+    c.bitmap(ix, vmid(len(icon)), icon)
+    if info:
+        c.text(ix + iw + TOP_GAP, vmid(GLYPH_H), info)
+
+
 def central(transport="ble", profile=1, connected=True, caps=False, left=80, right=45,
             log=(), layer="BASE"):
     c = Canvas()
-    c.bitmap(ICON_X, ICON_Y, ICONS["usb" if transport == "usb" else "bt"])
-    if transport == "ble":
-        c.text(PROFILE_X, PROFILE_Y, str(profile) + ("" if connected else "?"))
-    if caps:
-        c.bitmap(CAPS_X, CAPS_Y, ICONS["dot"])
+    if transport == "usb":
+        top_row(c, ICONS["usb"], caps=caps)
+    else:
+        top_row(c, ICONS["bt"], str(profile) + ("" if connected else "?"), caps)
     battery(c, left, right, True)
     keylog(c, list(log))
     w = len(layer) * ADV_X * 2 - 2
@@ -89,9 +100,7 @@ def central(transport="ble", profile=1, connected=True, caps=False, left=80, rig
 
 def peripheral(connected=True, level=64):
     c = Canvas()
-    c.bitmap(ICON_X, ICON_Y, ICONS["bt"])
-    if not connected:
-        c.text(PROFILE_X, PROFILE_Y, "?")
+    top_row(c, ICONS["bt"], "" if connected else "?")
     battery(c, level, None, False)
     return c
 

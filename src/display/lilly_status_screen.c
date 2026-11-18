@@ -58,22 +58,20 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define PW 32  /* portrait width  */
 #define PH 128 /* portrait height */
 
-#define ICON_X 1
-#define ICON_Y 1
-#define PROFILE_X 10
-#define PROFILE_Y 4
-#define CAPS_X 27
-#define CAPS_Y 4
+#define TOP_Y 1 /* top row: caps dot | centered icon | connection info */
+#define TOP_H 11
+#define TOP_GAP 2
+#define CAPS_X 1
 #define BAT_X 1
 #define BAT_Y 16
 #define BAT_W 27
 #define BAT_H 9
 #define BAR_X 3
 #define BAR_MAX_W 23
-#define LOG_Y 31
-#define LOG_ROWS 11
+#define LAYER_Y 28
+#define LOG_Y 42
+#define LOG_ROWS 12
 #define LOG_COLS 8
-#define LAYER_Y 116
 
 #define LOG_CLEAR_AFTER K_SECONDS(10)
 
@@ -96,7 +94,7 @@ static __maybe_unused void fill(int x, int y, int w, int h, bool on) {
     }
 }
 
-static __maybe_unused void bitmap(int x, int y, const uint8_t *rows, int w, int h, int scale) {
+static __maybe_unused void bitmap(int x, int y, const uint16_t *rows, int w, int h, int scale) {
     for (int r = 0; r < h; r++) {
         for (int c = 0; c < w; c++) {
             if (rows[r] & BIT(w - 1 - c)) {
@@ -184,15 +182,20 @@ static void render(void) {
     memset(px, OFF_VAL, sizeof(px));
 
 #if LILLY_CENTRAL
-    if (st.endpoint.transport == ZMK_TRANSPORT_USB) {
-        bitmap(ICON_X, ICON_Y, lilly_icon_usb, LILLY_ICON_USB_W, LILLY_ICON_USB_H, 1);
-    } else {
-        char prof[3] = {'1' + st.profile_index, st.profile_connected ? '\0' : '?', '\0'};
-        bitmap(ICON_X, ICON_Y, lilly_icon_bt, LILLY_ICON_BT_W, LILLY_ICON_BT_H, 1);
-        text(PROFILE_X, PROFILE_Y, prof, 1);
-    }
+    /* top row: caps dot fixed left, icon strictly centered, info right of the icon */
     if (st.caps) {
-        bitmap(CAPS_X, CAPS_Y, lilly_icon_dot, LILLY_ICON_DOT_W, LILLY_ICON_DOT_H, 1);
+        bitmap(CAPS_X, TOP_Y + (TOP_H - LILLY_ICON_DOT_H) / 2, lilly_icon_dot, LILLY_ICON_DOT_W,
+               LILLY_ICON_DOT_H, 1);
+    }
+    bool usb = st.endpoint.transport == ZMK_TRANSPORT_USB;
+    int icon_w = usb ? LILLY_ICON_USB_W : LILLY_ICON_BT_W;
+    int icon_h = usb ? LILLY_ICON_USB_H : LILLY_ICON_BT_H;
+    int icon_x = (PW - icon_w) / 2;
+    bitmap(icon_x, TOP_Y + (TOP_H - icon_h) / 2, usb ? lilly_icon_usb : lilly_icon_bt, icon_w,
+           icon_h, 1);
+    if (!usb) {
+        char prof[3] = {'1' + st.profile_index, st.profile_connected ? '\0' : '?', '\0'};
+        text(icon_x + icon_w + TOP_GAP, TOP_Y + (TOP_H - LILLY_GLYPH_H) / 2, prof, 1);
     }
 
     battery(st.bat_self, st.bat_peripheral, true);

@@ -8,7 +8,7 @@
 #define LILLY_ADV_Y 7
 
 /* ASCII 0x20..0x7E, 5 rows each, bit (W-1) = leftmost pixel; lowercase -> uppercase */
-static const __attribute__((unused)) uint8_t lilly_font[95][LILLY_GLYPH_H] = {
+static const __attribute__((unused)) uint16_t lilly_font[95][LILLY_GLYPH_H] = {
     {0x0, 0x0, 0x0, 0x0, 0x0}, /*   */
     {0x2, 0x2, 0x2, 0x0, 0x2}, /* ! */
     {0x5, 0x5, 0x0, 0x0, 0x0}, /* " */
@@ -108,15 +108,15 @@ static const __attribute__((unused)) uint8_t lilly_font[95][LILLY_GLYPH_H] = {
 
 #define LILLY_ICON_BT_W 7
 #define LILLY_ICON_BT_H 11
-static const __attribute__((unused)) uint8_t lilly_icon_bt[11] = {0x8, 0xc, 0xa, 0x49, 0x2a, 0x1c, 0x2a, 0x49, 0xa, 0xc, 0x8};
+static const __attribute__((unused)) uint16_t lilly_icon_bt[11] = {0x8, 0xc, 0xa, 0x49, 0x2a, 0x1c, 0x2a, 0x49, 0xa, 0xc, 0x8};
 
-#define LILLY_ICON_USB_W 7
-#define LILLY_ICON_USB_H 11
-static const __attribute__((unused)) uint8_t lilly_icon_usb[11] = {0x8, 0x1c, 0x8, 0x4b, 0x4b, 0x49, 0x2a, 0x1c, 0x8, 0x1c, 0x1c};
+#define LILLY_ICON_USB_W 11
+#define LILLY_ICON_USB_H 7
+static const __attribute__((unused)) uint16_t lilly_icon_usb[7] = {0x38, 0x40, 0x682, 0x7ff, 0x682, 0x58, 0x38};
 
 #define LILLY_ICON_DOT_W 4
 #define LILLY_ICON_DOT_H 4
-static const __attribute__((unused)) uint8_t lilly_icon_dot[4] = {0x6, 0xf, 0xf, 0x6};
+static const __attribute__((unused)) uint16_t lilly_icon_dot[4] = {0x6, 0xf, 0xf, 0x6};
 
 /* Right OLED picture, 32x128, bit 31 = leftmost pixel */
 #define LILLY_ART_H 128

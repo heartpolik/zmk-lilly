@@ -24,7 +24,7 @@ lines = [
     f"#define LILLY_ADV_Y {ADV_Y}",
     "",
     "/* ASCII 0x20..0x7E, 5 rows each, bit (W-1) = leftmost pixel; lowercase -> uppercase */",
-    "static const __attribute__((unused)) uint8_t lilly_font[95][LILLY_GLYPH_H] = {",
+    "static const __attribute__((unused)) uint16_t lilly_font[95][LILLY_GLYPH_H] = {",
 ]
 for code in range(0x20, 0x7F):
     ch = chr(code)
@@ -39,7 +39,7 @@ for name, rows in ICONS.items():
     bits = ", ".join(f"0x{b:x}" for b in rows_to_bits(rows))
     lines.append(f"#define LILLY_ICON_{name.upper()}_W {w}")
     lines.append(f"#define LILLY_ICON_{name.upper()}_H {h}")
-    lines.append(f"static const __attribute__((unused)) uint8_t lilly_icon_{name}[{h}] = {{{bits}}};")
+    lines.append(f"static const __attribute__((unused)) uint16_t lilly_icon_{name}[{h}] = {{{bits}}};")
     lines.append("")
 
 art = peripheral_art()
