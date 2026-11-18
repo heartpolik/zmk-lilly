@@ -1,22 +1,18 @@
 /*
  * Lilly custom status screen for the Lily58 128x32 SSD1306 OLED (LVGL 9).
  *
- * Everything is drawn on a portrait 32x128 canvas (hidden) and then rotated
- * into the visible 128x32 landscape canvas, so the OLED reads vertically.
+ * Pixels are written straight into a portrait 32x128 L8 buffer using the
+ * 3x5 font / icons from lilly_gfx.h (generated from tools/oled/font.py), then
+ * rotated into the visible 128x32 landscape canvas. tools/oled/preview.py
+ * renders the same layout to PNG - keep the two in sync.
  *
- * Central (left) half:
- *   - output: USB / BT profile + connection state
- *   - battery icon split lengthwise: left half = left battery, right half = right battery
- *   - L/R percentages
- *   - active layer name
- * Peripheral (right) half:
- *   - split link state
- *   - own battery
+ * Central (left):  connection icon + profile, caps-lock dot, battery with two
+ *                  bars (top = left half, bottom = right half), key log, layer.
+ * Peripheral:      link icon, own battery.
  *
  * SPDX-License-Identifier: MIT
  */
 
-#include <stdio.h>
 #include <string.h>
 
 #include <zephyr/kernel.h>
@@ -25,59 +21,152 @@
 #include <zmk/display.h>
 #include <zmk/event_manager.h>
 #include <zmk/battery.h>
-#include <zmk/usb.h>
 #include <zmk/events/battery_state_changed.h>
-#include <zmk/events/usb_conn_state_changed.h>
 
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 #define LILLY_CENTRAL 1
+#include <dt-bindings/zmk/hid_usage.h>
+#include <dt-bindings/zmk/hid_usage_pages.h>
+#include <dt-bindings/zmk/modifiers.h>
 #include <zmk/ble.h>
 #include <zmk/endpoints.h>
+#include <zmk/hid.h>
 #include <zmk/keymap.h>
+#include <zmk/usb.h>
 #include <zmk/events/ble_active_profile_changed.h>
 #include <zmk/events/endpoint_changed.h>
+#include <zmk/events/keycode_state_changed.h>
 #include <zmk/events/layer_state_changed.h>
+#include <zmk/events/usb_conn_state_changed.h>
+#if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
+#include <dt-bindings/zmk/hid_indicators.h>
+#include <zmk/hid_indicators.h>
+#include <zmk/events/hid_indicators_changed.h>
+#endif
 #else
 #define LILLY_CENTRAL 0
 #include <zmk/split/bluetooth/peripheral.h>
 #include <zmk/events/split_peripheral_status_changed.h>
 #endif
 
+#include "lilly_gfx.h"
+
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-/* ---------------------------------------------------------------- canvas -- */
+/* ---------------------------------------------------------------- layout -- */
+/* keep in sync with tools/oled/preview.py */
 
 #define PW 32  /* portrait width  */
 #define PH 128 /* portrait height */
+
+#define ICON_X 1
+#define ICON_Y 1
+#define PROFILE_X 10
+#define PROFILE_Y 4
+#define CAPS_X 27
+#define CAPS_Y 4
+#define BAT_X 1
+#define BAT_Y 16
+#define BAT_W 27
+#define BAT_H 9
+#define BAR_X 3
+#define BAR_MAX_W 23
+#define LOG_Y 31
+#define LOG_ROWS 11
+#define LOG_COLS 8
+#define LAYER_Y 116
+
+#define LOG_CLEAR_AFTER K_SECONDS(10)
+
+/* ---------------------------------------------------------------- canvas -- */
+
 #define CF LV_COLOR_FORMAT_L8
+#define ON_VAL (IS_ENABLED(CONFIG_LILLY_STATUS_SCREEN_INVERTED) ? 0xFF : 0x00)
+#define OFF_VAL (IS_ENABLED(CONFIG_LILLY_STATUS_SCREEN_INVERTED) ? 0x00 : 0xFF)
 
-#define BPP LV_COLOR_FORMAT_GET_BPP(CF)
+static uint8_t px[PH][PW]; /* portrait frame, stride = PW */
+static uint8_t landscape_buf[LV_CANVAS_BUF_SIZE(PH, PW, LV_COLOR_FORMAT_GET_BPP(CF),
+                                                LV_DRAW_BUF_STRIDE_ALIGN)] __aligned(4);
+static lv_obj_t *landscape;
 
-static uint8_t portrait_buf[LV_CANVAS_BUF_SIZE(PW, PH, BPP, LV_DRAW_BUF_STRIDE_ALIGN)] __aligned(4);
-static uint8_t landscape_buf[LV_CANVAS_BUF_SIZE(PH, PW, BPP, LV_DRAW_BUF_STRIDE_ALIGN)] __aligned(4);
+static void fill(int x, int y, int w, int h, bool on) {
+    for (int yy = MAX(y, 0); yy < MIN(y + h, PH); yy++) {
+        for (int xx = MAX(x, 0); xx < MIN(x + w, PW); xx++) {
+            px[yy][xx] = on ? ON_VAL : OFF_VAL;
+        }
+    }
+}
 
-static lv_obj_t *portrait;  /* drawing surface, hidden */
-static lv_obj_t *landscape; /* what the OLED shows */
+static void bitmap(int x, int y, const uint8_t *rows, int w, int h, int scale) {
+    for (int r = 0; r < h; r++) {
+        for (int c = 0; c < w; c++) {
+            if (rows[r] & BIT(w - 1 - c)) {
+                fill(x + c * scale, y + r * scale, scale, scale, true);
+            }
+        }
+    }
+}
 
-#define FG (IS_ENABLED(CONFIG_LILLY_STATUS_SCREEN_INVERTED) ? lv_color_white() : lv_color_black())
-#define BG (IS_ENABLED(CONFIG_LILLY_STATUS_SCREEN_INVERTED) ? lv_color_black() : lv_color_white())
-
-/* ----------------------------------------------------------------- state -- */
+static void text(int x, int y, const char *s, int scale) {
+    for (; *s; s++, x += LILLY_ADV_X * scale) {
+        char ch = *s;
+        if (ch >= 'a' && ch <= 'z') {
+            ch -= 'a' - 'A';
+        }
+        if (ch < 0x20 || ch > 0x7E) {
+            ch = '?';
+        }
+        bitmap(x, y, lilly_font[ch - 0x20], LILLY_GLYPH_W, LILLY_GLYPH_H, scale);
+    }
+}
 
 #define BAT_UNKNOWN 0xFF
 
+static void bar(int y, int h, uint8_t level) {
+    if (level == BAT_UNKNOWN) {
+        return;
+    }
+    int w = (MIN(level, 100) * BAR_MAX_W + 50) / 100;
+    if (level > 0 && w == 0) {
+        w = 1;
+    }
+    fill(BAR_X, y, w, h, true);
+}
+
+static void battery(uint8_t top, uint8_t bottom, bool split) {
+    fill(BAT_X, BAT_Y, BAT_W, BAT_H, true);
+    fill(BAT_X + 1, BAT_Y + 1, BAT_W - 2, BAT_H - 2, false);
+    fill(BAT_X + BAT_W, BAT_Y + 2, 2, BAT_H - 4, true); /* terminal */
+    if (split) {
+        bar(BAT_Y + 2, 2, top);
+        bar(BAT_Y + 5, 2, bottom);
+    } else {
+        bar(BAT_Y + 2, 5, top);
+    }
+}
+
+static void present(void) {
+    lv_draw_buf_t *dst = lv_canvas_get_draw_buf(landscape);
+    lv_draw_sw_rotate(px, dst->data, PW, PH, PW, dst->header.stride,
+                      IS_ENABLED(CONFIG_LILLY_STATUS_SCREEN_ROTATE_90) ? LV_DISPLAY_ROTATION_90
+                                                                       : LV_DISPLAY_ROTATION_270,
+                      CF);
+    lv_obj_invalidate(landscape);
+}
+
+/* ----------------------------------------------------------------- state -- */
+
 static struct {
     uint8_t bat_self;
-    bool charging;
 #if LILLY_CENTRAL
     uint8_t bat_peripheral;
     struct zmk_endpoint_instance endpoint;
     int profile_index;
     bool profile_connected;
-    bool profile_bonded;
-    zmk_keymap_layer_index_t layer_index;
+    bool caps;
     const char *layer_label;
+    zmk_keymap_layer_index_t layer_index;
 #else
     bool split_connected;
 #endif
@@ -88,156 +177,53 @@ static struct {
 #endif
 };
 
-/* --------------------------------------------------------------- drawing -- */
-
-static void draw_rect(int x, int y, int w, int h, lv_color_t color) {
-    if (w <= 0 || h <= 0) {
-        return;
-    }
-    lv_layer_t layer;
-    lv_canvas_init_layer(portrait, &layer);
-
-    lv_draw_rect_dsc_t dsc;
-    lv_draw_rect_dsc_init(&dsc);
-    dsc.bg_color = color;
-    lv_area_t a = {x, y, x + w - 1, y + h - 1};
-    lv_draw_rect(&layer, &dsc, &a);
-
-    lv_canvas_finish_layer(portrait, &layer);
-}
-
-static void draw_text(int y, const lv_font_t *font, const char *txt) {
-    lv_layer_t layer;
-    lv_canvas_init_layer(portrait, &layer);
-
-    lv_draw_label_dsc_t dsc;
-    lv_draw_label_dsc_init(&dsc);
-    dsc.color = FG;
-    dsc.font = font;
-    dsc.align = LV_TEXT_ALIGN_CENTER;
-    dsc.text = txt;
-    lv_area_t a = {0, y, PW - 1, y + lv_font_get_line_height(font) * 2};
-    lv_draw_label(&layer, &dsc, &a);
-
-    lv_canvas_finish_layer(portrait, &layer);
-}
-
-/*
- * Vertical battery, terminal on top. With `split`, the body is divided
- * lengthwise: left column = left half's charge, right column = right half's.
- */
-#define BAT_X 2
-#define BAT_Y 26
-#define BAT_W 28
-#define BAT_H 44
-#define BAT_FILL_H (BAT_H - 4)
-
-static void draw_fill(int x, int w, uint8_t level) {
-    if (level == BAT_UNKNOWN) {
-        /* unknown: small dash in the middle */
-        draw_rect(x + w / 2 - 2, BAT_Y + BAT_H / 2 - 1, 4, 2, FG);
-        return;
-    }
-    int h = (MIN(level, 100) * BAT_FILL_H + 50) / 100;
-    if (level > 0 && h == 0) {
-        h = 1;
-    }
-    draw_rect(x, BAT_Y + 2 + BAT_FILL_H - h, w, h, FG);
-}
-
-static void draw_battery(uint8_t left, uint8_t right, bool split) {
-    /* terminal */
-    draw_rect(BAT_X + BAT_W / 2 - 5, BAT_Y - 3, 10, 3, FG);
-    /* outline */
-    draw_rect(BAT_X, BAT_Y, BAT_W, BAT_H, FG);
-    draw_rect(BAT_X + 1, BAT_Y + 1, BAT_W - 2, BAT_H - 2, BG);
-
-    if (split) {
-        /* divider */
-        draw_rect(BAT_X + BAT_W / 2 - 1, BAT_Y, 2, BAT_H, FG);
-        draw_fill(BAT_X + 3, BAT_W / 2 - 5, left);
-        draw_fill(BAT_X + BAT_W / 2 + 2, BAT_W / 2 - 5, right);
-    } else {
-        draw_fill(BAT_X + 3, BAT_W - 6, left);
-    }
-}
-
-static void format_level(char *buf, size_t len, char side, uint8_t level, bool charging) {
-    if (level == BAT_UNKNOWN) {
-        snprintf(buf, len, "%c --", side);
-    } else if (level >= 100) {
-        snprintf(buf, len, "%c100", side);
-    } else {
-        snprintf(buf, len, "%c%c%2u", side, charging ? '+' : ' ', level);
-    }
-}
-
-static void present(void) {
-    lv_draw_buf_t *src = lv_canvas_get_draw_buf(portrait);
-    lv_draw_buf_t *dst = lv_canvas_get_draw_buf(landscape);
-
-    lv_draw_sw_rotate(src->data, dst->data, PW, PH, src->header.stride, dst->header.stride,
-                      IS_ENABLED(CONFIG_LILLY_STATUS_SCREEN_ROTATE_270) ? LV_DISPLAY_ROTATION_270
-                                                                        : LV_DISPLAY_ROTATION_90,
-                      CF);
-    lv_obj_invalidate(landscape);
-}
-
-static void render(void) {
-    static char line3[8];
 #if LILLY_CENTRAL
-    static char line1[16], line2[8], line4[8];
+/* key log: LOG_ROWS lines of LOG_COLS chars, newest line last */
+static char log_lines[LOG_ROWS][LOG_COLS + 1];
+static uint8_t log_row; /* current (last used) row */
 #endif
 
-    lv_canvas_fill_bg(portrait, BG, LV_OPA_COVER);
+/* ---------------------------------------------------------------- render -- */
+
+static void render(void) {
+    if (landscape == NULL) {
+        return;
+    }
+    memset(px, OFF_VAL, sizeof(px));
 
 #if LILLY_CENTRAL
-    /* output */
-    switch (st.endpoint.transport) {
-    case ZMK_TRANSPORT_USB:
-        snprintf(line1, sizeof(line1), LV_SYMBOL_USB);
-        snprintf(line2, sizeof(line2), "USB");
-        break;
-    case ZMK_TRANSPORT_BLE:
-        snprintf(line1, sizeof(line1), LV_SYMBOL_BLUETOOTH "%d", st.profile_index + 1);
-        snprintf(line2, sizeof(line2), "%s",
-                 !st.profile_bonded ? "NEW" : (st.profile_connected ? "OK" : "--"));
-        break;
-    default:
-        snprintf(line1, sizeof(line1), LV_SYMBOL_CLOSE);
-        snprintf(line2, sizeof(line2), "OFF");
-        break;
-    }
-    draw_text(0, &lv_font_montserrat_12, line1);
-    draw_text(14, &lv_font_unscii_8, line2);
-
-    /* battery: split lengthwise, left | right */
-    draw_battery(st.bat_self, st.bat_peripheral, true);
-    format_level(line3, sizeof(line3), 'L', st.bat_self, st.charging);
-    format_level(line4, sizeof(line4), 'R', st.bat_peripheral, false);
-    draw_text(BAT_Y + BAT_H + 5, &lv_font_unscii_8, line3);
-    draw_text(BAT_Y + BAT_H + 15, &lv_font_unscii_8, line4);
-
-    /* layer */
-    draw_rect(0, 97, PW, 1, FG);
-    if (st.layer_label != NULL && st.layer_label[0] != '\0') {
-        draw_text(102, &lv_font_montserrat_12, st.layer_label);
+    if (st.endpoint.transport == ZMK_TRANSPORT_USB) {
+        bitmap(ICON_X, ICON_Y, lilly_icon_usb, LILLY_ICON_USB_W, LILLY_ICON_USB_H, 1);
     } else {
-        static char layer_buf[8];
-        snprintf(layer_buf, sizeof(layer_buf), "L%u", st.layer_index);
-        draw_text(102, &lv_font_montserrat_12, layer_buf);
+        char prof[3] = {'1' + st.profile_index, st.profile_connected ? '\0' : '?', '\0'};
+        bitmap(ICON_X, ICON_Y, lilly_icon_bt, LILLY_ICON_BT_W, LILLY_ICON_BT_H, 1);
+        text(PROFILE_X, PROFILE_Y, prof, 1);
     }
+    if (st.caps) {
+        bitmap(CAPS_X, CAPS_Y, lilly_icon_dot, LILLY_ICON_DOT_W, LILLY_ICON_DOT_H, 1);
+    }
+
+    battery(st.bat_self, st.bat_peripheral, true);
+
+    for (int i = 0; i <= log_row; i++) {
+        text(0, LOG_Y + i * LILLY_ADV_Y, log_lines[i], 1);
+    }
+
+    char layer[5] = {0};
+    if (st.layer_label != NULL && st.layer_label[0] != '\0') {
+        strncpy(layer, st.layer_label, 4);
+    } else {
+        layer[0] = 'L';
+        layer[1] = '0' + (st.layer_index % 10);
+    }
+    int w = strlen(layer) * LILLY_ADV_X * 2 - 2;
+    text((PW - w) / 2, LAYER_Y, layer, 2);
 #else
-    /* split link */
-    draw_text(0, &lv_font_montserrat_12, LV_SYMBOL_BLUETOOTH);
-    draw_text(14, &lv_font_unscii_8, st.split_connected ? "OK" : "--");
-
-    draw_battery(st.bat_self, BAT_UNKNOWN, false);
-    format_level(line3, sizeof(line3), 'R', st.bat_self, st.charging);
-    draw_text(BAT_Y + BAT_H + 5, &lv_font_unscii_8, line3);
-
-    draw_rect(0, 97, PW, 1, FG);
-    draw_text(102, &lv_font_montserrat_12, "Lily");
+    bitmap(ICON_X, ICON_Y, lilly_icon_bt, LILLY_ICON_BT_W, LILLY_ICON_BT_H, 1);
+    if (!st.split_connected) {
+        text(PROFILE_X, PROFILE_Y, "?", 1);
+    }
+    battery(st.bat_self, BAT_UNKNOWN, false);
 #endif
 
     present();
@@ -245,33 +231,24 @@ static void render(void) {
 
 /* ------------------------------------------------------------- listeners -- */
 
-/* own battery + USB power */
+/* own battery */
 struct self_bat_state {
     uint8_t level;
-    bool charging;
 };
 
 static void self_bat_update(struct self_bat_state s) {
     st.bat_self = s.level;
-    st.charging = s.charging;
     render();
 }
 
 static struct self_bat_state self_bat_get(const zmk_event_t *eh) {
     const struct zmk_battery_state_changed *ev = as_zmk_battery_state_changed(eh);
-    return (struct self_bat_state){
-        .level = ev ? ev->state_of_charge : zmk_battery_state_of_charge(),
-#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
-        .charging = zmk_usb_is_powered(),
-#endif
-    };
+    return (struct self_bat_state){.level = ev ? ev->state_of_charge
+                                               : zmk_battery_state_of_charge()};
 }
 
 ZMK_DISPLAY_WIDGET_LISTENER(lilly_self_bat, struct self_bat_state, self_bat_update, self_bat_get)
 ZMK_SUBSCRIPTION(lilly_self_bat, zmk_battery_state_changed);
-#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
-ZMK_SUBSCRIPTION(lilly_self_bat, zmk_usb_conn_state_changed);
-#endif
 
 #if LILLY_CENTRAL
 
@@ -306,14 +283,12 @@ struct output_state {
     struct zmk_endpoint_instance endpoint;
     int profile_index;
     bool profile_connected;
-    bool profile_bonded;
 };
 
 static void output_update(struct output_state s) {
     st.endpoint = s.endpoint;
     st.profile_index = s.profile_index;
     st.profile_connected = s.profile_connected;
-    st.profile_bonded = s.profile_bonded;
     render();
 }
 
@@ -323,7 +298,6 @@ static struct output_state output_get(const zmk_event_t *_eh) {
 #if IS_ENABLED(CONFIG_ZMK_BLE)
         .profile_index = zmk_ble_active_profile_index(),
         .profile_connected = zmk_ble_active_profile_is_connected(),
-        .profile_bonded = !zmk_ble_active_profile_is_open(),
 #endif
     };
 }
@@ -360,6 +334,128 @@ static struct layer_state layer_get(const zmk_event_t *_eh) {
 ZMK_DISPLAY_WIDGET_LISTENER(lilly_layer, struct layer_state, layer_update, layer_get)
 ZMK_SUBSCRIPTION(lilly_layer, zmk_layer_state_changed);
 
+/* caps lock */
+#if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
+struct caps_state {
+    bool on;
+};
+
+static void caps_update(struct caps_state s) {
+    st.caps = s.on;
+    render();
+}
+
+static struct caps_state caps_get(const zmk_event_t *eh) {
+    const struct zmk_hid_indicators_changed *ev = as_zmk_hid_indicators_changed(eh);
+    zmk_hid_indicators_t ind = ev ? ev->indicators : zmk_hid_indicators_get_current_profile();
+    return (struct caps_state){.on = (ind & HID_INDICATOR_CAPS_LOCK) != 0};
+}
+
+ZMK_DISPLAY_WIDGET_LISTENER(lilly_caps, struct caps_state, caps_update, caps_get)
+ZMK_SUBSCRIPTION(lilly_caps, zmk_hid_indicators_changed);
+#endif
+
+/* ---------------------------------------------------------------- keylog -- */
+
+#define KEY_NEWLINE '\n'
+#define KEY_BACKSPACE '\b'
+
+K_MSGQ_DEFINE(keylog_q, sizeof(char), 32, 1);
+
+/* indexed from HID usage 0x1E (1) to 0x38 (/); 0 = ignore */
+static const char unshifted[] = "1234567890\n\0\b  -=[]\\\0;'`,./";
+static const char shifted[] = "!@#$%^&*()\n\0\b  _+{}|\0:\"~<>?";
+
+static char usage_to_char(uint32_t usage, bool shift) {
+    if (usage >= HID_USAGE_KEY_KEYBOARD_A && usage <= HID_USAGE_KEY_KEYBOARD_Z) {
+        return 'A' + (usage - HID_USAGE_KEY_KEYBOARD_A);
+    }
+    if (usage >= HID_USAGE_KEY_KEYBOARD_1_AND_EXCLAMATION &&
+        usage <= HID_USAGE_KEY_KEYBOARD_SLASH_AND_QUESTION_MARK) {
+        int i = usage - HID_USAGE_KEY_KEYBOARD_1_AND_EXCLAMATION;
+        return shift ? shifted[i] : unshifted[i];
+    }
+    return 0;
+}
+
+static void keylog_put(char c) {
+    char *line = log_lines[log_row];
+    size_t len = strlen(line);
+
+    if (c == KEY_BACKSPACE) {
+        if (len == 0 && log_row > 0) {
+            log_row--;
+            line = log_lines[log_row];
+            len = strlen(line);
+        }
+        if (len > 0) {
+            line[len - 1] = '\0';
+        }
+        return;
+    }
+
+    if (c == KEY_NEWLINE || len >= LOG_COLS) {
+        if (log_row == LOG_ROWS - 1) {
+            memmove(log_lines[0], log_lines[1], sizeof(log_lines[0]) * (LOG_ROWS - 1));
+            memset(log_lines[LOG_ROWS - 1], 0, sizeof(log_lines[0]));
+        } else {
+            log_row++;
+        }
+        if (c == KEY_NEWLINE) {
+            return;
+        }
+        line = log_lines[log_row];
+        len = 0;
+    }
+    line[len] = c;
+    line[len + 1] = '\0';
+}
+
+static void keylog_clear_cb(struct k_work *work) {
+    memset(log_lines, 0, sizeof(log_lines));
+    log_row = 0;
+    render();
+}
+static K_WORK_DELAYABLE_DEFINE(keylog_clear_work, keylog_clear_cb);
+
+static void keylog_drain_cb(struct k_work *work) {
+    char c;
+    bool changed = false;
+    while (k_msgq_get(&keylog_q, &c, K_NO_WAIT) == 0) {
+        keylog_put(c);
+        changed = true;
+    }
+    if (changed) {
+        render();
+    }
+}
+static K_WORK_DEFINE(keylog_drain_work, keylog_drain_cb);
+
+static int keylog_listener(const zmk_event_t *eh) {
+    const struct zmk_keycode_state_changed *ev = as_zmk_keycode_state_changed(eh);
+    if (ev == NULL || !ev->state || ev->usage_page != HID_USAGE_KEY ||
+        !zmk_display_is_initialized()) {
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+
+    zmk_mod_flags_t mods =
+        ev->implicit_modifiers | ev->explicit_modifiers | zmk_hid_get_explicit_mods();
+    if (mods & (MOD_LCTL | MOD_RCTL | MOD_LALT | MOD_RALT | MOD_LGUI | MOD_RGUI)) {
+        return ZMK_EV_EVENT_BUBBLE; /* shortcuts are not logged */
+    }
+
+    char c = usage_to_char(ev->keycode, (mods & (MOD_LSFT | MOD_RSFT)) != 0);
+    if (c != 0) {
+        k_msgq_put(&keylog_q, &c, K_NO_WAIT);
+        k_work_submit_to_queue(zmk_display_work_q(), &keylog_drain_work);
+        k_work_reschedule_for_queue(zmk_display_work_q(), &keylog_clear_work, LOG_CLEAR_AFTER);
+    }
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(lilly_keylog, keylog_listener);
+ZMK_SUBSCRIPTION(lilly_keylog, zmk_keycode_state_changed);
+
 #else /* peripheral */
 
 struct link_state {
@@ -384,17 +480,15 @@ ZMK_SUBSCRIPTION(lilly_link, zmk_split_peripheral_status_changed);
 
 lv_obj_t *zmk_display_status_screen(void) {
     lv_obj_t *screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(screen, BG, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
-
-    portrait = lv_canvas_create(screen);
-    lv_canvas_set_buffer(portrait, portrait_buf, PW, PH, CF);
-    lv_obj_add_flag(portrait, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_bg_color(screen,
+                              IS_ENABLED(CONFIG_LILLY_STATUS_SCREEN_INVERTED) ? lv_color_black()
+                                                                              : lv_color_white(),
+                              LV_PART_MAIN);
 
     landscape = lv_canvas_create(screen);
     lv_canvas_set_buffer(landscape, landscape_buf, PH, PW, CF);
     lv_obj_align(landscape, LV_ALIGN_TOP_LEFT, 0, 0);
-    lv_canvas_fill_bg(landscape, BG, LV_OPA_COVER);
 
     lilly_self_bat_init();
 #if LILLY_CENTRAL
@@ -403,9 +497,13 @@ lv_obj_t *zmk_display_status_screen(void) {
 #endif
     lilly_output_init();
     lilly_layer_init();
+#if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
+    lilly_caps_init();
+#endif
 #else
     lilly_link_init();
 #endif
 
+    render();
     return screen;
 }
