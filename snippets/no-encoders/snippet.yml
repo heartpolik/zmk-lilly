@@ -1,0 +1,6 @@
+# Build variant for a Lily58 without rotary encoders.
+# Used from build.yaml as `snippet: no-encoders`.
+name: no-encoders
+append:
+  EXTRA_DTC_OVERLAY_FILE: no-encoders.overlay
+  EXTRA_CONF_FILE: no-encoders.conf

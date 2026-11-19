@@ -1,0 +1,8 @@
+/* No encoders fitted: disable both (right_encoder is defined in config/lily58_*.overlay). */
+&left_encoder {
+    status = "disabled";
+};
+
+&right_encoder {
+    status = "disabled";
+};

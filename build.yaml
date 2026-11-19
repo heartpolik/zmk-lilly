@@ -1,9 +1,25 @@
 # Board: ProMicro nRF52840 (nice!nano-compatible clone) -> uses the nice_nano board definition.
+#
+# Two keyboards are built from the same config:
+#   lily58_*              - right half has a rotary encoder
+#   lily58_*_no_encoders  - no encoders (snippets/no-encoders)
 include:
   - board: nice_nano//zmk
     shield: lily58_left
+    artifact-name: lily58_left
   - board: nice_nano//zmk
     shield: lily58_right
+    artifact-name: lily58_right
+
+  - board: nice_nano//zmk
+    shield: lily58_left
+    snippet: no-encoders
+    artifact-name: lily58_left_no_encoders
+  - board: nice_nano//zmk
+    shield: lily58_right
+    snippet: no-encoders
+    artifact-name: lily58_right_no_encoders
+
   # TEMP: left half with USB serial logging, to debug the display never blanking
   - board: nice_nano//zmk
     shield: lily58_left
