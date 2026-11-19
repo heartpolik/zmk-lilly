@@ -4,3 +4,8 @@ include:
     shield: lily58_left
   - board: nice_nano//zmk
     shield: lily58_right
+  # TEMP: left half with USB serial logging, to debug the display never blanking
+  - board: nice_nano//zmk
+    shield: lily58_left
+    snippet: zmk-usb-logging
+    artifact-name: lily58_left_usb_logging
