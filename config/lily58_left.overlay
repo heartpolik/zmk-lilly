@@ -19,6 +19,9 @@
     sensors = <&left_encoder &right_encoder>;
 };
 
+// No encoder is fitted on the left half. The stock shield enables left_encoder,
+// and polling its unconnected pins produced phantom sensor events that kept the
+// keyboard "active", so the left display never blanked.
 &left_encoder {
-    status = "okay";
+    status = "disabled";
 };
