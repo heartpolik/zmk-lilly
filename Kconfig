@@ -10,6 +10,10 @@ if LILLY_STATUS_SCREEN
 config LILLY_STATUS_SCREEN_ROTATE_90
     bool "Rotate the portrait layout by 90 degrees instead of 270 (flips it upside down)"
 
+config LILLY_STATUS_SCREEN_WIN_LAYER
+    int "Index of the Windows-mode layer (shows the Windows mark); -1 = none"
+    default -1
+
 config LILLY_STATUS_SCREEN_INVERTED
     bool "Invert foreground/background colors"
 

@@ -58,10 +58,10 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define PW 32  /* portrait width  */
 #define PH 128 /* portrait height */
 
-#define TOP_Y 1 /* top row: caps dot | centered icon | connection info */
-#define TOP_H 11
-#define TOP_GAP 2
-#define CAPS_X 1
+#define TOP_Y 1 /* top row: [win mark] | die (BLE profile) or USB, centered | [caps dot] */
+#define TOP_H 12
+#define DIE_W 12
+#define SIDE_W ((PW - DIE_W) / 2) /* free space left / right of the die */
 #define BAT_X 1
 #define BAT_Y 16
 #define BAT_W 27
@@ -161,6 +161,7 @@ static struct {
     int profile_index;
     bool profile_connected;
     bool caps;
+    bool win; /* Windows-mode layer active */
     const char *layer_label;
     zmk_keymap_layer_index_t layer_index;
 } st = {
@@ -182,20 +183,40 @@ static void render(void) {
     memset(px, OFF_VAL, sizeof(px));
 
 #if LILLY_CENTRAL
-    /* top row: caps dot fixed left, icon strictly centered, info right of the icon */
-    if (st.caps) {
-        bitmap(CAPS_X, TOP_Y + (TOP_H - LILLY_ICON_DOT_H) / 2, lilly_icon_dot, LILLY_ICON_DOT_W,
-               LILLY_ICON_DOT_H, 1);
+    /* top row */
+    if (st.win) {
+        bitmap((SIDE_W - LILLY_ICON_WIN_W) / 2, TOP_Y + (TOP_H - LILLY_ICON_WIN_H) / 2,
+               lilly_icon_win, LILLY_ICON_WIN_W, LILLY_ICON_WIN_H, 1);
     }
-    bool usb = st.endpoint.transport == ZMK_TRANSPORT_USB;
-    int icon_w = usb ? LILLY_ICON_USB_W : LILLY_ICON_BT_W;
-    int icon_h = usb ? LILLY_ICON_USB_H : LILLY_ICON_BT_H;
-    int icon_x = (PW - icon_w) / 2;
-    bitmap(icon_x, TOP_Y + (TOP_H - icon_h) / 2, usb ? lilly_icon_usb : lilly_icon_bt, icon_w,
-           icon_h, 1);
-    if (!usb) {
-        char prof[3] = {'1' + st.profile_index, st.profile_connected ? '\0' : '?', '\0'};
-        text(icon_x + icon_w + TOP_GAP, TOP_Y + (TOP_H - LILLY_GLYPH_H) / 2, prof, 1);
+    if (st.endpoint.transport == ZMK_TRANSPORT_USB) {
+        bitmap((PW - LILLY_ICON_USB_W) / 2, TOP_Y + (TOP_H - LILLY_ICON_USB_H) / 2,
+               lilly_icon_usb, LILLY_ICON_USB_W, LILLY_ICON_USB_H, 1);
+    } else {
+        static const uint16_t *const dice[] = {lilly_icon_die1, lilly_icon_die2, lilly_icon_die3,
+                                               lilly_icon_die4, lilly_icon_die5};
+        const uint16_t *die = dice[CLAMP(st.profile_index, 0, (int)ARRAY_SIZE(dice) - 1)];
+        int dx = (PW - DIE_W) / 2, dy = TOP_Y + (TOP_H - LILLY_ICON_DIE1_H) / 2;
+        if (st.profile_connected) {
+            bitmap(dx, dy, die, DIE_W, LILLY_ICON_DIE1_H, 1);
+        } else {
+            /* not connected: solid die (rounded corners) with dark pips */
+            fill(dx, dy, DIE_W, LILLY_ICON_DIE1_H, true);
+            for (int r = 0; r < LILLY_ICON_DIE1_H; r++) {
+                for (int c = 0; c < DIE_W; c++) {
+                    bool edge_r = r == 0 || r == LILLY_ICON_DIE1_H - 1;
+                    bool edge_c = c == 0 || c == DIE_W - 1;
+                    bool pip = !edge_r && !edge_c && (die[r] & BIT(DIE_W - 1 - c));
+                    if ((edge_r && edge_c) || pip) {
+                        fill(dx + c, dy + r, 1, 1, false);
+                    }
+                }
+            }
+        }
+    }
+    if (st.caps) {
+        bitmap(PW - SIDE_W + (SIDE_W - LILLY_ICON_DOT_W) / 2,
+               TOP_Y + (TOP_H - LILLY_ICON_DOT_H) / 2, lilly_icon_dot, LILLY_ICON_DOT_W,
+               LILLY_ICON_DOT_H, 1);
     }
 
     battery(st.bat_self, st.bat_peripheral, true);
@@ -312,11 +333,13 @@ ZMK_SUBSCRIPTION(lilly_output, zmk_ble_active_profile_changed);
 struct layer_state {
     zmk_keymap_layer_index_t index;
     const char *label;
+    bool win;
 };
 
 static void layer_update(struct layer_state s) {
     st.layer_index = s.index;
     st.layer_label = s.label;
+    st.win = s.win;
     render();
 }
 
@@ -325,6 +348,10 @@ static struct layer_state layer_get(const zmk_event_t *_eh) {
     return (struct layer_state){
         .index = index,
         .label = zmk_keymap_layer_name(zmk_keymap_layer_index_to_id(index)),
+#if CONFIG_LILLY_STATUS_SCREEN_WIN_LAYER >= 0
+        .win = zmk_keymap_layer_active(
+            zmk_keymap_layer_index_to_id(CONFIG_LILLY_STATUS_SCREEN_WIN_LAYER)),
+#endif
     };
 }
 

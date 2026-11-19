@@ -118,6 +118,30 @@ static const __attribute__((unused)) uint16_t lilly_icon_usb[7] = {0x38, 0x40, 0
 #define LILLY_ICON_DOT_H 4
 static const __attribute__((unused)) uint16_t lilly_icon_dot[4] = {0x6, 0xf, 0xf, 0x6};
 
+#define LILLY_ICON_WIN_W 7
+#define LILLY_ICON_WIN_H 7
+static const __attribute__((unused)) uint16_t lilly_icon_win[7] = {0x77, 0x77, 0x77, 0x0, 0x77, 0x77, 0x77};
+
+#define LILLY_ICON_DIE1_W 12
+#define LILLY_ICON_DIE1_H 12
+static const __attribute__((unused)) uint16_t lilly_icon_die1[12] = {0x7fe, 0x801, 0x801, 0x801, 0x801, 0x861, 0x861, 0x801, 0x801, 0x801, 0x801, 0x7fe};
+
+#define LILLY_ICON_DIE2_W 12
+#define LILLY_ICON_DIE2_H 12
+static const __attribute__((unused)) uint16_t lilly_icon_die2[12] = {0x7fe, 0x801, 0x80d, 0x80d, 0x801, 0x801, 0x801, 0x801, 0xb01, 0xb01, 0x801, 0x7fe};
+
+#define LILLY_ICON_DIE3_W 12
+#define LILLY_ICON_DIE3_H 12
+static const __attribute__((unused)) uint16_t lilly_icon_die3[12] = {0x7fe, 0x801, 0x80d, 0x80d, 0x801, 0x861, 0x861, 0x801, 0xb01, 0xb01, 0x801, 0x7fe};
+
+#define LILLY_ICON_DIE4_W 12
+#define LILLY_ICON_DIE4_H 12
+static const __attribute__((unused)) uint16_t lilly_icon_die4[12] = {0x7fe, 0x801, 0xb0d, 0xb0d, 0x801, 0x801, 0x801, 0x801, 0xb0d, 0xb0d, 0x801, 0x7fe};
+
+#define LILLY_ICON_DIE5_W 12
+#define LILLY_ICON_DIE5_H 12
+static const __attribute__((unused)) uint16_t lilly_icon_die5[12] = {0x7fe, 0x801, 0xb0d, 0xb0d, 0x801, 0x861, 0x861, 0x801, 0xb0d, 0xb0d, 0x801, 0x7fe};
+
 /* Right OLED picture, 32x128, bit 31 = leftmost pixel */
 #define LILLY_ART_H 128
 static const __attribute__((unused)) uint32_t lilly_art[LILLY_ART_H] = {

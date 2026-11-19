@@ -14,8 +14,8 @@ from font import ADV_X, ADV_Y, FONT, GLYPH_H, GLYPH_W, ICONS
 PW, PH = 32, 128
 
 # --- layout (keep in sync with lilly_status_screen.c) ---------------------
-TOP_Y, TOP_H, TOP_GAP = 1, 11, 2  # top row: caps dot | centered icon | connection info
-CAPS_X = 1
+TOP_Y, TOP_H, TOP_GAP = 1, 12, 1  # top row: [win mark] | centered die / USB | [caps dot]
+DIE_W = 12
 BAT_X, BAT_Y, BAT_W, BAT_H = 1, 16, 27, 9
 BAR_X, BAR_MAX_W = 3, 23
 LAYER_Y = 28
@@ -71,26 +71,40 @@ def keylog(c, lines):
         c.text(0, LOG_Y + i * ADV_Y, line[:LOG_COLS])
 
 
-def top_row(c, icon, info="", caps=False):
-    """Caps dot fixed on the left, icon strictly centered, info right of the icon."""
+def top_row(c, icon, info="", caps=False, os=None, invert_icon=False):
+    """OS mark on the left, icon strictly centered, info right of it, caps dot on the right."""
     def vmid(h):
         return TOP_Y + (TOP_H - h) // 2
+    # side marks are centered in the free space left / right of the (fixed-size) die
+    side = (PW - DIE_W) // 2
+    if os == "win":
+        w = len(ICONS["win"][0])
+        c.bitmap((side - w) // 2, vmid(len(ICONS["win"])), ICONS["win"])
     if caps:
-        c.bitmap(CAPS_X, vmid(len(ICONS["dot"])), ICONS["dot"])
+        w = len(ICONS["dot"][0])
+        c.bitmap(PW - side + (side - w) // 2, vmid(len(ICONS["dot"])), ICONS["dot"])
     iw = len(icon[0])
     ix = (PW - iw) // 2
+    if invert_icon:
+        # solid die (rounded corners) with dark pips: keep only the pips from the outline icon
+        h_, w_ = len(icon), len(icon[0])
+        corners = {(0, 0), (w_ - 1, 0), (0, h_ - 1), (w_ - 1, h_ - 1)}
+        frame = lambda x, y: x in (0, w_ - 1) or y in (0, h_ - 1)
+        icon = ["".join(
+            "." if (x, y) in corners or (icon[y][x] == "#" and not frame(x, y)) else "#"
+            for x in range(w_)) for y in range(h_)]
     c.bitmap(ix, vmid(len(icon)), icon)
     if info:
         c.text(ix + iw + TOP_GAP, vmid(GLYPH_H), info)
 
 
 def central(transport="ble", profile=1, connected=True, caps=False, left=80, right=45,
-            log=(), layer="BASE"):
+            log=(), layer="BASE", os=None):
     c = Canvas()
     if transport == "usb":
-        top_row(c, ICONS["usb"], caps=caps)
+        top_row(c, ICONS["usb"], caps=caps, os=os)
     else:
-        top_row(c, ICONS["bt"], str(profile) + ("" if connected else "?"), caps)
+        top_row(c, ICONS[f"die{profile}"], caps=caps, os=os, invert_icon=not connected)
     battery(c, left, right, True)
     keylog(c, list(log))
     w = len(layer) * ADV_X * 2 - 2

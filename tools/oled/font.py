@@ -126,5 +126,43 @@ def _rotate_cw(rows):
     return ["".join(rows[h - 1 - r][c] for r in range(h)) for c in range(w)]
 
 
+# Windows-mode mark, 7x7
+ICONS["win"] = [
+    "###.###",
+    "###.###",
+    "###.###",
+    ".......",
+    "###.###",
+    "###.###",
+    "###.###",
+]
+
+# Dice 12x12 for BLE profiles 1..5: rounded frame, 2x2 square pips on a 3x3 grid
+def _die(n):
+    g = [["."] * 12 for _ in range(12)]
+    for i in range(1, 11):
+        g[0][i] = g[11][i] = g[i][0] = g[i][11] = "#"
+
+    def pip(col, row):  # col/row in 0..2
+        x, y = 2 + 3 * col, 2 + 3 * row
+        for dy in range(2):
+            for dx in range(2):
+                g[y + dy][x + dx] = "#"
+
+    layout = {
+        1: [(1, 1)],
+        2: [(2, 0), (0, 2)],
+        3: [(2, 0), (1, 1), (0, 2)],
+        4: [(0, 0), (2, 0), (0, 2), (2, 2)],
+        5: [(0, 0), (2, 0), (1, 1), (0, 2), (2, 2)],
+    }[n]
+    for p in layout:
+        pip(*p)
+    return ["".join(r) for r in g]
+
+
+for _n in range(1, 6):
+    ICONS[f"die{_n}"] = _die(_n)
+
 # USB trident lying on its side: plug on the left, arrow pointing right (11x7)
 ICONS["usb"] = _rotate_cw(ICONS["usb"])
